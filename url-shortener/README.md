@@ -39,4 +39,73 @@
 
 ### Write Path
 
+- We move out the Key Generation Service (KGS) to scale out the system. We can use one of three solutions to shorten a url: 1. Random ID Generator. 2. Hashing Function. 3. Token Range.
+
+#### Random ID Generator Solution
+
+- The ingress is distributed using a load balancer, with algorithms like random, round robin, etc. The load balancer then routes the traffic to one of multiple random id generators. The random id generators use a random function or a Universally Unique Identifiers (UUID).
+- The random id generation solution must verify with the DB every time whether the short url has been used before.
+- An alternative to this is Twitter's Snowflake, which has a 64 bit output length. This however also has overlaps, which means we also mush check the DB first.
+- The Random ID Generator is _not_ recommended as a url shortening solution.
+
+#### Hashing Function Solution
+
+- We apply the same load balancer concept here as well. We can use MD5 hashing function which outputs 128 bits. Or SHA256 of length 256 bits.
+  1. MD5: We take the first 7 characters from the 128/6 (bits used per base62 encoded characters) = 22 characters. After which we append random bits to the suffix to make the output nonpredictable, at the expense of readability.
+  2. SHA256: The probability of collision is higher than MD5 because we also take the first 7 characters from the 256 bits.
+- The Hashing Function is _not_ recommended as a url shortening solution.
+
+#### Token Range Solution
+
+- The load balancer uses consistent hashing to distribute.
+- The output of the token service must be non-overlapping.
+- The token range service is a highly reliable distributed service such as Apache Zookeeper which is used to coordinate the output range of token service instances. This service might become a bottleneck. We solve this be either increasing the replicas or the output range.
+- We must check the existence of the long url in the db first before generating a short url. We use a bloom filter to prevent expensive data store lookups.
+- We introduce an additional data store with inverted index mapping long urls to short urls instead of the opposite, to solve the problem of finding a short url using the long url.
+- The time complexity is O(1).
+
+### Read Path
+
+- We also cache following the 80/20 rule to improve latency.
+- When a cache miss occurs, we query the data store to populate the cache. We use Least Recently Used (LRU) policy to evict the cache when the server is full.
+- Since the typical usage pattern of a url shortener is to access a short url once, this results in cache thrashing. To prevent this we use bloom filters, which are updated on initial accesses to short urls. On subsequent accesses, the server checks the bloom filter first. If the short url doesn't exist, it returns a 404. If it exists (which might be a false positive), the cache server is checked, then if needed, the data store.
+- We can replicate the cache servers and use one for write operations (leader cache), and the rest for read operations (follower caches).
+- If multiple identical requests arrive to the cache server, the requests will be collapsed, and the response reused among all clients.
+
+## Design Deep Dive
+
+### Availability
+
+- Availability can be improved by:
+  - load balancer runs either in active-active or active-passive mode.
+  - KGS runs either in active-active or active-passive mode.
+  - back up the storage servers at least once a day to object storage such as AWS S3 to aid disaster recovery.
+  - rate-limiting the traffic to prevent DDoS attacks and malicious users.
+
+### Rate Limiting
+
+- We use API keys for registered clients, and cookies for anonymous clients to be able to identify malicious clients and rate limit them. IP is also used to rate limit.
+
+### Scalability
+
+- We do the following to scale a system:
+  1. benchmark or load test.
+  2. profile for bottlenecks or a single point of failure (SPOF).
+  3. address bottlenecks.
+
+### Fault Tolerance
+
+- We use a microservice architecture to improve fault tolerance; if one component fails, it fails alone.
+- We use a message queue such as Apache Kafka or RabbitMQ to isolate components, allow concurrent operations, make it fail independently, and asynchronous processing, at the cost of system complexity.
+
+### Partitioning
+
+- We partition these services using partition keys of either the long url or the short url.
+  - bloom filter in write path uses long url partition key.
+  - bloom filter in read path uses short url partition key.
+  - data store and cache use short url partition key.
+  - data store (inverted index?) uses long url partition key.
+
+### Concurrency
+
 -
