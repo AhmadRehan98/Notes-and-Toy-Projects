@@ -108,4 +108,35 @@
 
 ### Concurrency
 
--
+- The Key Generation Service (KGS) must acquire a mutex lock or a semaphore on the atomic data structure distributing the short urls to handle concurrency. This lock prevents distributing the same short url to multiple concurrent long url requests.
+- We can use a message queue, collapsed forwarding feature of a reverse proxy, or a distributed lock service to solve the problem of clients entering the same long url at the same time must receive the same short url.
+
+### Analytics
+
+- The HTTP headers of url redirection requests are used to collect data for the generation of analytics. The most popular HTTP headers useful for analytics are: user-agent, cookie, authorization, referer, and date.
+
+### Database Cleanup
+
+- To remove expired records in the database we use either:
+  1- Lazy removal: when the client accesses an expired url, remove it and respond with 404.
+  2- Dedicated cleanup service: executed during non-peak hours to remove expired urls by scanning the whole database. If the traffic spikes, the service mush be stopped, and the system would fallback to lazy removal.
+
+### Archive
+
+- he data that is frequently accessed is classified as hot data and the data that was not accessed for a significant amount of time (assume a time frame of 3 years) is classified as cold data.
+- The last_visited timestamp column of the database is used for data classification. The cold data is compressed and stored in object storage (AWS S3) during non-peak hours to avoid degradation of the service.
+- The unused data must be archived only if you are certain that the data will not be accessed in the future.
+
+### Monitoring
+
+- Monitoring is usually implemented by installing an agent on each of the servers (services). The agent collects and aggregates the metrics and publishes the result data to a central monitoring service.
+
+### Security
+
+- The following list covers some of the most popular security measures:
+  - use JWT token for authorization.
+  - rate limit the requests.
+  - encrypt the data.
+  - sanitize user input to prevent Cross Site Scripting (XSS).
+  - use parameterized queries to prevent SQL injection.
+  - use the principle of least privilege.
